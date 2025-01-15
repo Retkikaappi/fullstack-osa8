@@ -1,6 +1,5 @@
 const { ApolloServer } = require('@apollo/server')
 const { startStandaloneServer } = require('@apollo/server/standalone')
-const { v1: uuid } = require('uuid')
 const typeDefs = require('./typedefs')
 
 const jwt = require('jsonwebtoken')
@@ -9,6 +8,7 @@ mongoose.set('strictQuery', false)
 require('dotenv').config()
 const Author = require('./models/author')
 const Book = require('./models/book')
+const User = require('./models/user')
 const author = require('./models/author')
 const { GraphQLError } = require('graphql')
 
@@ -22,84 +22,6 @@ mongoose
   .catch((e) => {
     console.log('error connecting to DB', e.message)
   })
-
-let authors = [
-  {
-    name: 'Robert Martin',
-    id: 'afa51ab0-344d-11e9-a414-719c6709cf3e',
-    born: 1952,
-  },
-  {
-    name: 'Martin Fowler',
-    id: 'afa5b6f0-344d-11e9-a414-719c6709cf3e',
-    born: 1963,
-  },
-  {
-    name: 'Fyodor Dostoevsky',
-    id: 'afa5b6f1-344d-11e9-a414-719c6709cf3e',
-    born: 1821,
-  },
-  {
-    name: 'Joshua Kerievsky', // birthyear not known
-    id: 'afa5b6f2-344d-11e9-a414-719c6709cf3e',
-  },
-  {
-    name: 'Sandi Metz', // birthyear not known
-    id: 'afa5b6f3-344d-11e9-a414-719c6709cf3e',
-  },
-]
-
-let books = [
-  {
-    title: 'Clean Code',
-    published: 2008,
-    author: 'Robert Martin',
-    id: 'afa5b6f4-344d-11e9-a414-719c6709cf3e',
-    genres: ['refactoring'],
-  },
-  {
-    title: 'Agile software development',
-    published: 2002,
-    author: 'Robert Martin',
-    id: 'afa5b6f5-344d-11e9-a414-719c6709cf3e',
-    genres: ['agile', 'patterns', 'design'],
-  },
-  {
-    title: 'Refactoring, edition 2',
-    published: 2018,
-    author: 'Martin Fowler',
-    id: 'afa5de00-344d-11e9-a414-719c6709cf3e',
-    genres: ['refactoring'],
-  },
-  {
-    title: 'Refactoring to patterns',
-    published: 2008,
-    author: 'Joshua Kerievsky',
-    id: 'afa5de01-344d-11e9-a414-719c6709cf3e',
-    genres: ['refactoring', 'patterns'],
-  },
-  {
-    title: 'Practical Object-Oriented Design, An Agile Primer Using Ruby',
-    published: 2012,
-    author: 'Sandi Metz',
-    id: 'afa5de02-344d-11e9-a414-719c6709cf3e',
-    genres: ['refactoring', 'design'],
-  },
-  {
-    title: 'Crime and punishment',
-    published: 1866,
-    author: 'Fyodor Dostoevsky',
-    id: 'afa5de03-344d-11e9-a414-719c6709cf3e',
-    genres: ['classic', 'crime'],
-  },
-  {
-    title: 'Demons',
-    published: 1872,
-    author: 'Fyodor Dostoevsky',
-    id: 'afa5de04-344d-11e9-a414-719c6709cf3e',
-    genres: ['classic', 'revolution'],
-  },
-]
 
 const resolvers = {
   Query: {
@@ -128,15 +50,28 @@ const resolvers = {
       return Book.find({ genres: args.genre }).populate('author')
     },
     allAuthors: async () => Author.find({}),
+    me: async (root, args, { activeUser }) => {
+      return activeUser
+    },
   },
   Author: {
-    bookCount: (args) => {
-      const booksBy = books.filter((e) => e.author === args.name)
+    bookCount: async (args) => {
+      const books = await Book.find({}).populate('author')
+      const booksBy = books.filter((e) => e.author.name === args.name)
       return booksBy.length
     },
   },
+
   Mutation: {
-    addBook: async (root, args) => {
+    addBook: async (root, args, { activeUser }) => {
+      if (!activeUser) {
+        throw new GraphQLError('bad authentication', {
+          extensions: {
+            code: 'BAD_USER_INPUT',
+          },
+        })
+      }
+
       const authorInDb = await Author.findOne({ name: args.author })
 
       if (!authorInDb) {
@@ -151,7 +86,6 @@ const resolvers = {
             {
               extensions: {
                 code: 'BAD_USER_INPUT',
-                invalidArgs: args,
                 error,
               },
             }
@@ -182,24 +116,58 @@ const resolvers = {
         })
       })
     },
-    editAuthor: async (root, args) => {
-      const author = Author.findOne({ name: args.name })
-      if (!author) {
-        return null
-      }
-      author.born = args.setBornTo //pitäs olla pakollinen born kenttä, tai tehdä vaihtaa uuteen olioon
-      try {
-        await author.save()
-      } catch (e) {
-        throw new GraphQLError('birthyear edit error', {
+    editAuthor: async (root, args, { activeUser }) => {
+      if (!activeUser) {
+        throw new GraphQLError('bad authentication', {
           extensions: {
             code: 'BAD_USER_INPUT',
-            invalidArgs: args.setBornTo,
-            e,
           },
         })
       }
+      const author = await Author.findOneAndUpdate(
+        { name: args.name },
+        { born: args.setBornTo },
+        { new: true }
+      )
+      if (!author) {
+        throw new GraphQLError('user not found', {
+          extensions: {
+            code: 'BAD_USER_INPUT',
+            invalidArgs: args.name,
+          },
+        })
+      }
+      // palauttaa null vaikka ei päästäkkään tänne...
       return author
+    },
+    createUser: async (root, args) => {
+      const user = new User(args)
+      return user.save().catch((error) => {
+        throw new GraphQLError('Failed to add new user', {
+          extensions: {
+            code: 'BAD_USER_INPUT',
+            invalidArgs: args,
+            error,
+          },
+        })
+      })
+    },
+    login: async (root, { username, password }) => {
+      const user = await User.findOne({ username })
+
+      if (!user || password !== 'testpass') {
+        throw new GraphQLError('Invalid login credentials', {
+          extensions: { code: 'BAD_USER_INPUT' },
+        })
+      }
+
+      const token = {
+        value: jwt.sign(
+          { username: user.username, id: user._id },
+          process.env.SECRET
+        ),
+      }
+      return token
     },
   },
 }
@@ -211,6 +179,14 @@ const server = new ApolloServer({
 
 startStandaloneServer(server, {
   listen: { port: 4000 },
+  context: async ({ req, resp }) => {
+    const token = req ? req.headers.authorization : null
+    if (token && token.startsWith('Bearer ')) {
+      const decoToken = jwt.verify(token.substring(7), process.env.SECRET)
+      const activeUser = await User.findById(decoToken.id)
+      return { activeUser }
+    }
+  },
 }).then(({ url }) => {
   console.log(`Server ready at ${url}`)
 })
