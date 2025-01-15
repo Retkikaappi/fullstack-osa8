@@ -1,6 +1,27 @@
 const { ApolloServer } = require('@apollo/server')
 const { startStandaloneServer } = require('@apollo/server/standalone')
 const { v1: uuid } = require('uuid')
+const typeDefs = require('./typedefs')
+
+const jwt = require('jsonwebtoken')
+const mongoose = require('mongoose')
+mongoose.set('strictQuery', false)
+require('dotenv').config()
+const Author = require('./models/author')
+const Book = require('./models/book')
+const author = require('./models/author')
+const { GraphQLError } = require('graphql')
+
+console.log('connecting to', process.env.MONGODB_URI)
+
+mongoose
+  .connect(process.env.MONGODB_URI)
+  .then(() => {
+    console.log('connected to DB')
+  })
+  .catch((e) => {
+    console.log('error connecting to DB', e.message)
+  })
 
 let authors = [
   {
@@ -27,20 +48,6 @@ let authors = [
     id: 'afa5b6f3-344d-11e9-a414-719c6709cf3e',
   },
 ]
-
-/*
- * Suomi:
- * Saattaisi olla järkevämpää assosioida kirja ja sen tekijä tallettamalla kirjan yhteyteen tekijän nimen sijaan tekijän id
- * Yksinkertaisuuden vuoksi tallennamme kuitenkin kirjan yhteyteen tekijän nimen
- *
- * English:
- * It might make more sense to associate a book with its author by storing the author's id in the context of the book instead of the author's name
- * However, for simplicity, we will store the author's name in connection with the book
- *
- * Spanish:
- * Podría tener más sentido asociar un libro con su autor almacenando la id del autor en el contexto del libro en lugar del nombre del autor
- * Sin embargo, por simplicidad, almacenaremos el nombre del autor en conexión con el libro
- */
 
 let books = [
   {
@@ -94,76 +101,33 @@ let books = [
   },
 ]
 
-const typeDefs = `
-
-
-  
-  type Book {
-    title: String!
-    author: String!
-    published: Int!
-    genres: [String!]!
-  }
-
-  type Author {
-    name: String!
-    born: Int
-    bookCount: Int
-  }
-
-  type Query {
-    bookCount(name: String):Int!
-    authorCount: Int!
-    allBooks (author: String genre: String): [Book!]!
-    allAuthors: [Author!]!
-  }
-
-  type Mutation {
-    addBook(
-      title: String!
-      author: String!
-      published: Int!
-      genres: [String!]!
-    ): Book
-
-    addAuthor(
-    name: String!
-    born: Int
-    bookCount: Int
-    ): Author
-
-    editAuthor(
-    name: String!
-    setBornTo: Int!
-    ): Author
-  }
-`
-
 const resolvers = {
   Query: {
-    bookCount: (root, args) => books.length,
-    authorCount: () => authors.length,
-    allBooks: (root, args) => {
+    bookCount: async () => Book.collection.countDocuments(),
+    authorCount: async () => Author.collection.countDocuments(),
+    allBooks: async (root, args) => {
       if (!(args.author || args.genre)) {
-        return books
+        return Book.find({}).populate('author')
       }
 
       if (args.author && args.genre) {
-        const booksBy = books.filter(
-          (e) => e.genres.includes(args.genre) && e.author === args.author
+        const booksByGenre = await Book.find({ genres: args.genre }).populate(
+          'author'
         )
-        return booksBy
+        const booksByBoth = booksByGenre.filter(
+          (e) => e.author.name === args.author
+        )
+        return booksByBoth
       }
 
       if (args.author) {
-        const booksByAuthor = books.filter((e) => e.author === args.author)
-        return booksByAuthor
+        const booksByAuthor = await Book.find({}).populate('author')
+        return booksByAuthor.filter((e) => e.author.name === args.author)
       }
 
-      const booksByGenre = books.filter((e) => e.genres.includes(args.genre))
-      return booksByGenre
+      return Book.find({ genres: args.genre }).populate('author')
     },
-    allAuthors: (root, args) => authors,
+    allAuthors: async () => Author.find({}),
   },
   Author: {
     bookCount: (args) => {
@@ -172,27 +136,70 @@ const resolvers = {
     },
   },
   Mutation: {
-    addBook: (root, args) => {
-      if (!books.find((e) => e.author === args.author)) {
-        authors = authors.concat({ name: args.author, id: uuid() })
+    addBook: async (root, args) => {
+      const authorInDb = await Author.findOne({ name: args.author })
+
+      if (!authorInDb) {
+        try {
+          const newAuthor = new Author({ name: args.author })
+          await newAuthor.save()
+          const book = new Book({ ...args, author: newAuthor })
+          return book.save()
+        } catch (error) {
+          throw new GraphQLError(
+            'Failed to create a new book or a new author',
+            {
+              extensions: {
+                code: 'BAD_USER_INPUT',
+                invalidArgs: args,
+                error,
+              },
+            }
+          )
+        }
       }
-      const book = { ...args, id: uuid() }
-      books = books.concat(book)
-      return book
+
+      const book = new Book({ ...args, author: authorInDb })
+      return book.save().catch((error) => {
+        throw new GraphQLError('Failed to create a new book', {
+          extensions: {
+            code: 'BAD_USER_INPUT',
+            invalidArgs: args.title,
+            error,
+          },
+        })
+      })
     },
-    addAuthor: (root, args) => {
-      const author = { ...args, id: uuid() }
-      authors = authors.concat(author)
-      return author
+    addAuthor: async (root, args) => {
+      const author = new Author({ ...args })
+      return author.save().catch((error) => {
+        throw new GraphQLError('Failed to add new author', {
+          extensions: {
+            code: 'BAD_USER_INPUT',
+            invalidArgs: args.name,
+            error,
+          },
+        })
+      })
     },
-    editAuthor: (root, args) => {
-      const author = authors.find((e) => e.name === args.name)
+    editAuthor: async (root, args) => {
+      const author = Author.findOne({ name: args.name })
       if (!author) {
         return null
       }
-      const newAuthor = { ...author, born: args.setBornTo }
-      authors = authors.map((e) => (e.name === args.name ? newAuthor : e))
-      return newAuthor
+      author.born = args.setBornTo //pitäs olla pakollinen born kenttä, tai tehdä vaihtaa uuteen olioon
+      try {
+        await author.save()
+      } catch (e) {
+        throw new GraphQLError('birthyear edit error', {
+          extensions: {
+            code: 'BAD_USER_INPUT',
+            invalidArgs: args.setBornTo,
+            e,
+          },
+        })
+      }
+      return author
     },
   },
 }
