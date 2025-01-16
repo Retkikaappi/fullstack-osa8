@@ -1,16 +1,39 @@
 import { useMutation } from '@apollo/client'
 import { useState } from 'react'
-import { ADD_BOOK, ALL_BOOKS } from '../queries'
+import { ADD_BOOK, ALL_BOOKS, GENRE_BOOKS } from '../queries'
 
-const NewBook = () => {
+const NewBook = ({ token }) => {
   const [title, setTitle] = useState('')
   const [author, setAuthor] = useState('')
   const [published, setPublished] = useState('')
   const [genre, setGenre] = useState('')
   const [genres, setGenres] = useState([])
 
+  // vaikuttaakin erittäin työläältä jos lisätyllä kirjalla on monta genreä, mutta ei löytynyt kätevämpää tapaa
   const [addBook] = useMutation(ADD_BOOK, {
-    refetchQueries: [{ query: ALL_BOOKS }],
+    update: (cache, { data: { addBook } }) => {
+      cache.updateQuery(
+        { query: GENRE_BOOKS, variables: { genre: null } },
+        (data) => {
+          if (!data) {
+            return null
+          }
+          return { allBooks: data.allBooks.concat(addBook) }
+        }
+      )
+
+      addBook.genres.forEach((ele) => {
+        cache.updateQuery(
+          { query: GENRE_BOOKS, variables: { genre: ele } },
+          (data) => {
+            if (!data) {
+              return null
+            }
+            return { allBooks: data.allBooks.concat(addBook) }
+          }
+        )
+      })
+    },
   })
 
   const submit = async (event) => {
@@ -30,6 +53,17 @@ const NewBook = () => {
   const addGenre = () => {
     setGenres(genres.concat(genre))
     setGenre('')
+  }
+
+  if (!token) {
+    return (
+      <div>
+        <p>not logged in</p>{' '}
+        <a href='/login' style={{ fontSize: '2em' }}>
+          click here to login
+        </a>
+      </div>
+    )
   }
 
   return (

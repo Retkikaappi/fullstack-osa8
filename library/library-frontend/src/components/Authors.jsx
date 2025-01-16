@@ -1,13 +1,14 @@
 import { useMutation, useQuery } from '@apollo/client'
 import { ALL_AUTHORS, EDIT_AUTHOR } from '../queries'
 
-const Authors = () => {
+const Authors = ({ token }) => {
   const authors = useQuery(ALL_AUTHORS)
   const [editAuthor] = useMutation(EDIT_AUTHOR, {
     refetchQueries: [{ query: ALL_AUTHORS }],
   })
 
   //backend toimii samalla tavalla kuin esimerkissä mutta ei silti re-renderöi automaattisesti...
+  //voisi kyllä tehdä updatella, mutta jääköön
 
   if (authors.loading) {
     return <div>Loading...</div>
@@ -40,21 +41,23 @@ const Authors = () => {
         </tbody>
       </table>
 
-      <div>
-        <h2>Set birthyear</h2>
-        <form onSubmit={(e) => handleChange(e)}>
-          <select name='name'>
-            {authors.data.allAuthors.map((e) => (
-              <option key={`opt_${e.name}`} value={e.name}>
-                {e.name}
-              </option>
-            ))}
-          </select>
-          <br />
-          born <input type='number' name='year' />
-          <button>update author</button>
-        </form>
-      </div>
+      {token && (
+        <div>
+          <h2>Set birthyear</h2>
+          <form onSubmit={(e) => handleChange(e)}>
+            <select name='name'>
+              {authors.data.allAuthors.map((e) => (
+                <option key={`opt_${e.name}`} value={e.name}>
+                  {e.name}
+                </option>
+              ))}
+            </select>
+            <br />
+            born <input type='number' name='year' />
+            <button>update author</button>
+          </form>
+        </div>
+      )}
     </div>
   )
 }
