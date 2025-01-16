@@ -13,7 +13,6 @@ const Recommendations = () => {
 
   const genreBooks = useQuery(GENRE_BOOKS, {
     variables: { genre },
-    onCompleted: (resp) => {},
   })
 
   if (user.loading) {
