@@ -21,7 +21,7 @@ const typeDefs = `
   type Author {
     name: String!
     born: Int
-    bookCount: Int
+    bookCount: [Book!]!
     id: ID!
   }
 
@@ -32,6 +32,10 @@ const typeDefs = `
     allAuthors: [Author!]!
     me: User
   }
+
+  type Subscription {
+    addedBook: Book!
+    }
 
   type Mutation {
     addBook(

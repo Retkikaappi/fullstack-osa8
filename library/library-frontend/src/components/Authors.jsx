@@ -7,9 +7,6 @@ const Authors = ({ token }) => {
     refetchQueries: [{ query: ALL_AUTHORS }],
   })
 
-  //backend toimii samalla tavalla kuin esimerkissä mutta ei silti re-renderöi automaattisesti...
-  //voisi kyllä tehdä updatella, mutta jääköön
-
   if (authors.loading) {
     return <div>Loading...</div>
   }
@@ -35,7 +32,7 @@ const Authors = ({ token }) => {
             <tr key={a.name}>
               <td>{a.name}</td>
               <td>{a.born}</td>
-              <td>{a.bookCount}</td>
+              <td>{a.bookCount.length}</td>
             </tr>
           ))}
         </tbody>

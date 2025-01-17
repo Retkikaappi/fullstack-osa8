@@ -4,18 +4,52 @@ import NewBook from './components/NewBook'
 import Login from './components/Login'
 import { Link, Routes, Route } from 'react-router-dom'
 import { useEffect, useState } from 'react'
-import { useApolloClient } from '@apollo/client'
+import { useApolloClient, useSubscription } from '@apollo/client'
 import Recommendations from './components/Recommendations'
+
+import { ADDED_BOOK, GENRE_BOOKS } from './queries'
 
 const App = () => {
   const [token, setToken] = useState(null)
   const client = useApolloClient()
+
   useEffect(() => {
     const user = localStorage.getItem('library-activeUser')
     if (user) {
       setToken(user)
     }
   }, [])
+
+  useSubscription(ADDED_BOOK, {
+    onData: ({ data }) => {
+      const book = data.data.addedBook
+      window.alert(`new book added: ${book.title} by ${book.author.name}`)
+
+      //ei genreä update
+      client.cache.updateQuery(
+        { query: GENRE_BOOKS, variables: { genre: null } },
+        (data) => {
+          if (!data) {
+            return null
+          }
+          return { allBooks: data.allBooks.concat(book) }
+        }
+      )
+
+      //update jokaiselle genrelle
+      book.genres.forEach((ele) => {
+        client.cache.updateQuery(
+          { query: GENRE_BOOKS, variables: { genre: ele } },
+          (data) => {
+            if (!data) {
+              return null
+            }
+            return { allBooks: data.allBooks.concat(book) }
+          }
+        )
+      })
+    },
+  })
 
   const handleLogout = () => {
     localStorage.clear()

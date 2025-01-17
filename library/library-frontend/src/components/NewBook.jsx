@@ -9,32 +9,7 @@ const NewBook = ({ token }) => {
   const [genre, setGenre] = useState('')
   const [genres, setGenres] = useState([])
 
-  // vaikuttaakin erittäin työläältä jos lisätyllä kirjalla on monta genreä, mutta ei löytynyt kätevämpää tapaa
-  const [addBook] = useMutation(ADD_BOOK, {
-    update: (cache, { data: { addBook } }) => {
-      cache.updateQuery(
-        { query: GENRE_BOOKS, variables: { genre: null } },
-        (data) => {
-          if (!data) {
-            return null
-          }
-          return { allBooks: data.allBooks.concat(addBook) }
-        }
-      )
-
-      addBook.genres.forEach((ele) => {
-        cache.updateQuery(
-          { query: GENRE_BOOKS, variables: { genre: ele } },
-          (data) => {
-            if (!data) {
-              return null
-            }
-            return { allBooks: data.allBooks.concat(addBook) }
-          }
-        )
-      })
-    },
-  })
+  const [addBook] = useMutation(ADD_BOOK)
 
   const submit = async (event) => {
     event.preventDefault()
